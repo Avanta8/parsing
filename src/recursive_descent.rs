@@ -12,11 +12,13 @@ enum Elem<'a> {
     Expanded(&'a NonTerminal, usize), // usize is arena_idx of child tree
 }
 
+#[derive(Debug, Clone)]
 enum Step<'a> {
     Terminal(TreeResult<'a>),
     NonTerminal(Vec<TreeResult<'a>>),
 }
 
+#[derive(Debug, Clone)]
 enum TreeResult<'a> {
     Incomplete(Tree<'a, Incomplete>),
     Complete(Tree<'a, Complete>),
@@ -35,9 +37,9 @@ impl<'a> TreeResult<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Incomplete;
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Complete;
 
 #[derive(Debug, Clone)]
@@ -135,31 +137,29 @@ impl<'a> Tree<'a, Complete> {
     }
 }
 
-pub fn parse<'a>(grammar: &'a Grammar, tokens: &'a [String]) -> Option<Ast<'a>> {
-    // let mut bag = VecDeque::from([(Tree::new(grammar), 0)]);
+pub fn parse<'a>(grammar: &'a Grammar, tokens: &'a [&str]) -> Option<Ast<'a>> {
     let mut bag = VecDeque::from([(TreeResult::new(grammar), 0)]);
+    let mut steps = 0;
     while let Some((tree_result, idx)) = bag.pop_back() {
+        steps += 1;
         match tree_result {
-            TreeResult::Incomplete(tree) => {
-                dbg!(idx);
-                // dbg!((&tree, idx));
-
-                match tree.step(tokens.get(idx).map(|x| x.as_str())) {
-                    Step::Terminal(tree_result) => bag.push_front((tree_result, idx + 1)),
-                    Step::NonTerminal(tree_results) => {
-                        for tree_result in tree_results {
-                            bag.push_front((tree_result, idx));
-                        }
+            TreeResult::Incomplete(tree) => match tree.step(tokens.get(idx).copied()) {
+                Step::Terminal(tree_result) => bag.push_front((tree_result, idx + 1)),
+                Step::NonTerminal(tree_results) => {
+                    for tree_result in tree_results {
+                        bag.push_front((tree_result, idx));
                     }
                 }
-            }
+            },
 
             TreeResult::Complete(tree) => {
                 if idx == tokens.len() {
+                    dbg!(steps);
                     return Some(tree.to_ast());
                 }
             }
         }
     }
+    dbg!(steps);
     None
 }

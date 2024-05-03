@@ -6,26 +6,30 @@ use parsing::{
 };
 
 fn build_grammar(
-    given_nonterminals: Vec<impl Into<String>>,
-    terminals: Vec<impl Into<String>>,
-    given_productions: Vec<(impl Into<String>, Vec<Vec<impl Into<String>>>)>,
-    start: impl Into<String>,
+    given_nonterminals: &str,
+    terminals: &str,
+    // given_productions: Vec<(impl Into<String>, Vec<Vec<impl Into<String>>>)>,
+    given_productions: Vec<(&str, &str)>,
+    start: &str,
 ) -> Grammar {
     let nonterminals = given_nonterminals
-        .into_iter()
+        .split_whitespace()
         .map(|nt| NonTerminal(nt.into()))
         .collect::<HashSet<_>>();
-    let terminals = terminals.into_iter().map(|t| Terminal(t.into())).collect();
+    let terminals = terminals
+        .split_whitespace()
+        .map(|t| Terminal(t.into()))
+        .collect();
     let mut productions = vec![];
     for production in given_productions {
-        let lhs = production.0.into();
-        for rhs in production.1 {
+        let lhs = production.0;
+        for rhs in production.1.split('|').map(|s| s.trim()) {
             productions.push(Production {
-                lhs: NonTerminal(lhs.clone()),
+                lhs: NonTerminal(lhs.to_string()),
                 rhs: {
-                    rhs.into_iter()
+                    rhs.split_whitespace()
                         .map(|s| {
-                            let s = s.into();
+                            let s = s.to_string();
                             if nonterminals.contains(&NonTerminal(s.clone())) {
                                 Symbol::NonTerminal(NonTerminal(s))
                             } else {
@@ -45,29 +49,44 @@ fn build_grammar(
     }
 }
 
-fn main() {
-    let grammar = build_grammar(
-        ["E", "E'", "T", "T'", "F"].into(),
-        ["+", "*", "(", ")", "ID", "$"].into(),
-        vec![
-            // ("E", vec![vec!["T", "E'", "$"]]),
-            ("E", vec![vec!["T", "E'"]]),
-            ("E'", vec![vec![], vec!["+", "T", "E'"]]),
-            ("T", vec![vec!["F", "T'"]]),
-            ("T'", vec![vec!["*", "F", "T'"], vec![]]),
-            ("F", vec![vec!["(", "E", ")"], vec!["ID"]]),
-        ],
-        "E",
-    );
-
-    // let tokens = ["ID", "+", "ID"].map(ToString::to_string);
-    let tokens = ["ID", "+", "ID", "*", "ID", "+", "ID"].map(ToString::to_string);
-    // let tokens = ["ID", "*", "ID", "+", "ID"].map(ToString::to_string);
-    // let tokens = ["ID"].map(ToString::to_string);
-
-    let res = recursive_descent::parse(&grammar, &tokens);
-    // println!("{:?}", res);
+fn run(grammar: &Grammar, s: &str) {
+    let tokens = s.split_whitespace().collect::<Vec<_>>();
+    let res = recursive_descent::parse(grammar, &tokens);
     if let Some(r) = res {
         println!("{}", r);
+    }
+}
+
+fn main() {
+    let grammars = [
+        build_grammar(
+            "E E' T T' F ID",
+            "+ * ( ) x y z w",
+            vec![
+                ("E", "T E'"),
+                ("E'", "+ T E' | "),
+                ("T", "F T'"),
+                ("T'", "* F T' | "),
+                ("F", "( E ) | |ID"),
+                ("ID", "w | x | y | z"),
+            ],
+            "E",
+        ),
+        build_grammar(
+            "E T F ID",
+            "+ * ( ) w x y z",
+            vec![
+                ("E", "E + T | T"),
+                ("T", "T * F | F"),
+                ("F", "( E ) | ID"),
+                ("F", "( E ) | x"),
+                ("ID", "w | x | y | z"),
+            ],
+            "E",
+        ),
+    ];
+    for grammar in grammars {
+        let tokens = "w + x * ( y + z ) * w";
+        run(&grammar, tokens);
     }
 }
