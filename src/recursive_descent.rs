@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 
 use crate::{
-    ast::{Ast, AstNode},
     grammar::{Grammar, NonTerminal, Symbol, Terminal},
+    parse_tree::ParseTree,
 };
 
 #[derive(Debug, Clone)]
@@ -114,30 +114,29 @@ impl<'a> Tree<'a, Incomplete> {
 }
 
 impl<'a> Tree<'a, Complete> {
-    fn idx_to_astnodes(&self, arena_idx: usize) -> Vec<AstNode<'a>> {
+    fn idx_to_astnodes(&self, arena_idx: usize) -> Vec<ParseTree<'a>> {
         let elems = &self.arena[arena_idx];
         let children = elems
             .iter()
             .map(|elem| match elem {
-                Elem::Terminal(t) => AstNode::Terminal(t),
+                Elem::Terminal(t) => ParseTree::Terminal(t),
                 Elem::Unexpanded(_) => unreachable!("Trying to convert unexpanded into AST"),
                 &Elem::Expanded(nt, arena_idx) => {
-                    AstNode::NonTerminal(Ast::new(nt, self.idx_to_astnodes(arena_idx)))
+                    ParseTree::NonTerminal(nt, self.idx_to_astnodes(arena_idx))
                 }
             })
             .collect::<Vec<_>>();
         children
     }
 
-    fn to_ast(&self) -> Ast<'a> {
-        let AstNode::NonTerminal(start) = self.idx_to_astnodes(0).swap_remove(0) else {
-            panic!("Root was not a NonTerminal")
-        };
-        start
+    fn to_ast(&self) -> ParseTree<'a> {
+        self.idx_to_astnodes(0)
+            .pop()
+            .expect("Parse tree was empty. No root node?")
     }
 }
 
-pub fn parse<'a>(grammar: &'a Grammar, tokens: &'a [&str]) -> Option<Ast<'a>> {
+pub fn parse<'a>(grammar: &'a Grammar, tokens: &'a [&str]) -> Option<ParseTree<'a>> {
     let mut bag = VecDeque::from([(TreeResult::new(grammar), 0)]);
     let mut steps = 0;
     while let Some((tree_result, idx)) = bag.pop_back() {
