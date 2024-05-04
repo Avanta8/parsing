@@ -136,7 +136,7 @@ impl<'a> Tree<'a, Complete> {
     }
 }
 
-pub fn parse<'a>(grammar: &'a Grammar, tokens: &'a [&str]) -> Option<ParseTree<'a>> {
+pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Option<ParseTree<'a>> {
     let mut bag = VecDeque::from([(TreeResult::new(grammar), 0)]);
     let mut steps = 0;
     while let Some((tree_result, idx)) = bag.pop_back() {
