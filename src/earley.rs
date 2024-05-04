@@ -2,7 +2,10 @@
 
 use std::{collections::HashMap, fmt, marker::PhantomData};
 
-use crate::grammar::{Grammar, Production, Symbol};
+use crate::{
+    grammar::{Grammar, Production, Symbol},
+    parse_tree::ParseTree,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Complete;
@@ -73,6 +76,22 @@ enum ItemEnum<'a> {
     Complete(Item<'a, Complete>),
 }
 
+impl<'a> ItemEnum<'a> {
+    fn next_symbol(&self) -> Option<&Symbol> {
+        match self {
+            ItemEnum::Incomplete(i) => Some(i.next_symbol()),
+            ItemEnum::Complete(_) => None,
+        }
+    }
+
+    fn production(&self) -> &Production {
+        match self {
+            ItemEnum::Incomplete(i) => &i.production,
+            ItemEnum::Complete(i) => &i.production,
+        }
+    }
+}
+
 impl<'a> fmt::Display for ItemEnum<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -98,6 +117,54 @@ impl<'a> ItemEnum<'a> {
             })
         }
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn build_trees<'a>(
+    states: &'a [Vec<(ItemEnum<'a>, usize)>],
+    hist: &HashMap<(usize, usize), Vec<((usize, usize), (usize, usize))>>,
+    current: (usize, usize),
+) -> Vec<ParseTree<'a>> {
+    let lhs = &states[current.0][current.1].0.production().lhs;
+
+    let mut bag = vec![(current, vec![])];
+    let mut parse_trees = vec![];
+    while let Some((current, row)) = bag.pop() {
+        if let Some(hists) = hist.get(&current) {
+            for &(prev, parent) in hists.iter() {
+                if parent == (69, 69) {
+                    // Was a scan
+                    let ItemEnum::Incomplete(item) = &states[prev.0][prev.1].0 else {
+                        panic!("Not an Incomplete");
+                    };
+                    let Symbol::Terminal(t) = item.next_symbol() else {
+                        panic!("Not a terminal");
+                    };
+
+                    let mut row = row.clone();
+                    row.push(ParseTree::Terminal(t));
+                    bag.push((prev, row));
+                } else {
+                    // Was a complete
+                    let trees = build_trees(states, hist, parent);
+                    for tree in trees.into_iter() {
+                        let mut row = row.clone();
+                        row.push(tree);
+                        bag.push((prev, row));
+                    }
+                }
+            }
+        } else {
+            assert_eq!(lhs, &states[current.0][current.1].0.production().lhs);
+            let mut row = row;
+            row.reverse();
+            parse_trees.push(row);
+        }
+    }
+    parse_trees
+        .into_iter()
+        .map(|row| ParseTree::NonTerminal(lhs, row))
+        .collect()
 }
 
 pub fn parse(grammar: &Grammar, tokens: &[&str]) -> Option<()> {
@@ -131,8 +198,18 @@ pub fn parse(grammar: &Grammar, tokens: &[&str]) -> Option<()> {
                         if end < tokens.len() && tokens[end] == symbol.0 {
                             let value = (item.clone().to_next(), start);
                             assert!(!std::ptr::eq(next, taddr));
-                            if !next.contains(&value) {
-                                next.push(value);
+                            match next.iter().position(|x| x == &value) {
+                                Some(next_idx) => hist
+                                    .get_mut(&(end + 1, next_idx))
+                                    .unwrap()
+                                    .push(((end, item_idx), (69, 69))),
+                                None => {
+                                    hist.insert(
+                                        (end + 1, next.len()),
+                                        vec![((end, item_idx), (69, 69))],
+                                    );
+                                    next.push(value);
+                                }
                             }
                         } else if end >= tokens.len() {
                             assert_eq!(end, tokens.len());
@@ -209,16 +286,32 @@ pub fn parse(grammar: &Grammar, tokens: &[&str]) -> Option<()> {
         }
     }
 
-    let mut collect = hist.into_iter().collect::<Vec<_>>();
+    let mut collect = hist.iter().collect::<Vec<_>>();
     collect.sort();
-    for (current, parents) in collect {
-        for (prev, parent) in parents {
+    for (&current, parents) in collect.into_iter() {
+        for &(prev, parent) in parents.iter() {
             println!(
-                "{:?}\t{}\t{}",
+                "{:?}\t{}\t{}\t{}",
                 (current, prev, parent),
                 states[current.0][current.1].0,
-                states[parent.0][parent.1].0,
+                states[prev.0][prev.1].0,
+                if parent == (69, 69) {
+                    "".to_string()
+                } else {
+                    states[parent.0][parent.1].0.to_string()
+                },
             );
+        }
+    }
+
+    let mut complete = vec![];
+    for (item_idx, &(ref item, start)) in states.last().unwrap().iter().enumerate() {
+        if matches!(item, ItemEnum::Complete(_)) && start == 0 {
+            complete.push((states.len() - 1, item_idx));
+            let trees = build_trees(&states, &hist, (states.len() - 1, item_idx));
+            for tree in trees {
+                println!("{}\n", tree);
+            }
         }
     }
 
