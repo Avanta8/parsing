@@ -54,10 +54,13 @@ fn run(grammar: &Grammar, s: &str) {
     let tokens = s.split_whitespace().collect::<Vec<_>>();
     // let res = recursive_descent::parse(grammar, &tokens);
     let res = earley::parse(grammar, &tokens);
-    println!("finished");
-    if let Some(r) = res {
-        // println!("{}", r);
+    for r in res {
+        println!("{}\n", r);
     }
+    println!("finished\n");
+    // if let Some(r) = res {
+    // println!("{}", r);
+    // }
 }
 
 fn main() {
@@ -87,6 +90,12 @@ fn main() {
             "E",
         ),
         build_grammar(
+            "E | ID",
+            "+ * ( ) w x y z",
+            vec![("E", "E + E | E * E | ( E ) | ID"), ("ID", "w | x | y | z")],
+            "E",
+        ),
+        build_grammar(
             "S NP VP PP N V P",
             "can fish in rivers they",
             vec![
@@ -100,13 +109,18 @@ fn main() {
             ],
             "S",
         ),
+        build_grammar("S", "b", vec![("S", "S S | b")], "S"),
     ];
-    for grammar in grammars[0..2].iter() {
+    for grammar in grammars[0..3].iter() {
         let tokens = "w + x * ( y + z ) * w";
         run(grammar, tokens);
     }
-    for grammar in grammars[2..3].iter() {
+    for grammar in grammars[3..4].iter() {
         let tokens = "they can fish";
+        run(grammar, tokens);
+    }
+    for grammar in grammars[4..5].iter() {
+        let tokens = "b b b";
         run(grammar, tokens);
     }
 }

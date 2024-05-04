@@ -7,61 +7,66 @@ use crate::{
     parse_tree::ParseTree,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Complete;
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Incomplete;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Item<'a, C> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ItemBase<'a, C> {
     production: &'a Production,
     dot_idx: usize,
     _complete: PhantomData<C>,
 }
 
-impl<'a, C> fmt::Display for Item<'a, C> {
+impl<'a, C> fmt::Display for ItemBase<'a, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let before = self.production.rhs[..self.dot_idx]
+            .iter()
+            .map(|s| match s {
+                Symbol::Terminal(s) => s.0.as_str(),
+                Symbol::NonTerminal(s) => s.0.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let after = self.production.rhs[self.dot_idx..]
+            .iter()
+            .map(|s| match s {
+                Symbol::Terminal(s) => s.0.as_str(),
+                Symbol::NonTerminal(s) => s.0.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
         write!(
             f,
-            "{} -> {} . {}",
+            "{} -> {}{}.{}{}",
             self.production.lhs.0,
-            self.production.rhs[..self.dot_idx]
-                .iter()
-                .map(|s| match s {
-                    Symbol::Terminal(s) => s.0.as_str(),
-                    Symbol::NonTerminal(s) => s.0.as_str(),
-                })
-                .collect::<Vec<_>>()
-                .join(" "),
-            self.production.rhs[self.dot_idx..]
-                .iter()
-                .map(|s| match s {
-                    Symbol::Terminal(s) => s.0.as_str(),
-                    Symbol::NonTerminal(s) => s.0.as_str(),
-                })
-                .collect::<Vec<_>>()
-                .join(" "),
+            before,
+            if before.is_empty() { "" } else { " " },
+            if after.is_empty() { "" } else { " " },
+            after,
         )
     }
 }
 
-impl<'a> Item<'a, Incomplete> {
-    pub fn next_symbol(&self) -> &Symbol {
+impl<'a> ItemBase<'a, Incomplete> {
+    pub fn next_symbol(&self) -> &'a Symbol {
         &self.production.rhs[self.dot_idx]
     }
 
-    pub fn to_next(mut self) -> ItemEnum<'a> {
+    pub fn to_next(mut self) -> Item<'a> {
         self.dot_idx += 1;
         if self.dot_idx < self.production.rhs.len() {
-            ItemEnum::Incomplete(self)
+            Item::Incomplete(self)
         } else {
-            ItemEnum::Complete(self.into())
+            Item::Complete(self.into())
         }
     }
 }
 
-impl<'a> From<Item<'a, Incomplete>> for Item<'a, Complete> {
-    fn from(value: Item<'a, Incomplete>) -> Self {
+impl<'a> From<ItemBase<'a, Incomplete>> for ItemBase<'a, Complete> {
+    fn from(value: ItemBase<'a, Incomplete>) -> Self {
         Self {
             production: value.production,
             dot_idx: value.dot_idx,
@@ -70,47 +75,40 @@ impl<'a> From<Item<'a, Incomplete>> for Item<'a, Complete> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum ItemEnum<'a> {
-    Incomplete(Item<'a, Incomplete>),
-    Complete(Item<'a, Complete>),
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Item<'a> {
+    Incomplete(ItemBase<'a, Incomplete>),
+    Complete(ItemBase<'a, Complete>),
 }
 
-impl<'a> ItemEnum<'a> {
-    fn next_symbol(&self) -> Option<&Symbol> {
+impl<'a> Item<'a> {
+    fn production(&self) -> &'a Production {
         match self {
-            ItemEnum::Incomplete(i) => Some(i.next_symbol()),
-            ItemEnum::Complete(_) => None,
-        }
-    }
-
-    fn production(&self) -> &Production {
-        match self {
-            ItemEnum::Incomplete(i) => &i.production,
-            ItemEnum::Complete(i) => &i.production,
+            Item::Incomplete(i) => i.production,
+            Item::Complete(i) => i.production,
         }
     }
 }
 
-impl<'a> fmt::Display for ItemEnum<'a> {
+impl<'a> fmt::Display for Item<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ItemEnum::Incomplete(item) => item.fmt(f),
-            ItemEnum::Complete(item) => item.fmt(f),
+            Item::Incomplete(item) => item.fmt(f),
+            Item::Complete(item) => item.fmt(f),
         }
     }
 }
 
-impl<'a> ItemEnum<'a> {
+impl<'a> Item<'a> {
     pub fn new(production: &'a Production) -> Self {
         if production.rhs.is_empty() {
-            Self::Complete(Item::<Complete> {
+            Self::Complete(ItemBase {
                 production,
                 dot_idx: 0,
                 _complete: PhantomData,
             })
         } else {
-            Self::Incomplete(Item::<Incomplete> {
+            Self::Incomplete(ItemBase {
                 production,
                 dot_idx: 0,
                 _complete: PhantomData,
@@ -119,44 +117,62 @@ impl<'a> ItemEnum<'a> {
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[derive(Debug, Clone)]
+enum HistoryValue {
+    Scan {
+        prev: (usize, usize),
+    },
+    Complete {
+        prev: (usize, usize),
+        // parent is really the child production
+        parent: (usize, usize),
+    },
+}
+
+/// Builds all possible parse trees for the item at `current`.
+///
+/// If the inputs are valid, then the tree is built up to the location of the dot
+/// with the root being the nonterminal of the lhs of the production a `current`.
 fn build_trees<'a>(
-    states: &'a [Vec<(ItemEnum<'a>, usize)>],
-    hist: &HashMap<(usize, usize), Vec<((usize, usize), (usize, usize))>>,
+    states: &[Vec<(Item<'a>, usize)>],
+    hist: &HashMap<(usize, usize), Vec<HistoryValue>>,
     current: (usize, usize),
 ) -> Vec<ParseTree<'a>> {
     let lhs = &states[current.0][current.1].0.production().lhs;
 
+    // The row for parse tree children in built in reverse
     let mut bag = vec![(current, vec![])];
     let mut parse_trees = vec![];
-    while let Some((current, row)) = bag.pop() {
+    while let Some((current, mut row)) = bag.pop() {
+        assert_eq!(lhs, &states[current.0][current.1].0.production().lhs);
         if let Some(hists) = hist.get(&current) {
-            for &(prev, parent) in hists.iter() {
-                if parent == (69, 69) {
-                    // Was a scan
-                    let ItemEnum::Incomplete(item) = &states[prev.0][prev.1].0 else {
-                        panic!("Not an Incomplete");
-                    };
-                    let Symbol::Terminal(t) = item.next_symbol() else {
-                        panic!("Not a terminal");
-                    };
+            for history in hists.iter() {
+                match *history {
+                    HistoryValue::Scan { prev } => {
+                        let Item::Incomplete(item) = &states[prev.0][prev.1].0 else {
+                            panic!("Not an Incomplete");
+                        };
+                        let Symbol::Terminal(t) = item.next_symbol() else {
+                            panic!("Not a terminal");
+                        };
 
-                    let mut row = row.clone();
-                    row.push(ParseTree::Terminal(t));
-                    bag.push((prev, row));
-                } else {
-                    // Was a complete
-                    let trees = build_trees(states, hist, parent);
-                    for tree in trees.into_iter() {
                         let mut row = row.clone();
-                        row.push(tree);
+                        row.push(ParseTree::Terminal(t));
                         bag.push((prev, row));
+                    }
+                    HistoryValue::Complete { prev, parent } => {
+                        let trees = build_trees(states, hist, parent);
+                        for tree in trees.into_iter() {
+                            let mut row = row.clone();
+                            row.push(tree);
+                            bag.push((prev, row));
+                        }
                     }
                 }
             }
         } else {
-            assert_eq!(lhs, &states[current.0][current.1].0.production().lhs);
-            let mut row = row;
+            // Was a predict
+            // Dot is at the start of the rhs so we have finished building the parse tree
             row.reverse();
             parse_trees.push(row);
         }
@@ -167,153 +183,148 @@ fn build_trees<'a>(
         .collect()
 }
 
-pub fn parse(grammar: &Grammar, tokens: &[&str]) -> Option<()> {
+pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Vec<ParseTree<'a>> {
     let mut states = vec![vec![]; tokens.len() + 1];
     for production in grammar.productions_from(&grammar.start) {
-        states[0].push((ItemEnum::new(production), 0));
+        states[0].push((Item::new(production), 0));
     }
     let mut hist = HashMap::<_, Vec<_>>::new();
+
     for end in 0..states.len() {
-        // HACK:
-        let mut t = vec![];
-        let taddr = &t as *const _;
-        let (front, current, next) = {
-            let (left, right) = states.split_at_mut(end + 1);
+        let (front, current, tail) = {
+            let (left, tail) = states.split_at_mut(end + 1);
             let (front, current) = left.split_at_mut(end);
-            (
-                front,
-                current.first_mut().unwrap(),
-                right.first_mut().unwrap_or(&mut t),
-            )
+            (front, &mut current[0], tail)
         };
 
         let mut item_idx = 0;
-        while let Some(&(ref item, start)) = current.get(item_idx) {
-            // println!("end: {end}, item_idx: {item_idx}");
+        while let Some(&(item, start)) = current.get(item_idx) {
+            // `end`: index in tokens of dot.
+            // `start`: index in tokens of start symbol of production
             match item {
-                ItemEnum::Incomplete(item) => match item.next_symbol() {
+                Item::Incomplete(item) => match item.next_symbol() {
                     Symbol::Terminal(symbol) => {
                         // Scan
-                        // TODO: Better end checking.
-                        if end < tokens.len() && tokens[end] == symbol.0 {
-                            let value = (item.clone().to_next(), start);
-                            assert!(!std::ptr::eq(next, taddr));
-                            match next.iter().position(|x| x == &value) {
-                                Some(next_idx) => hist
-                                    .get_mut(&(end + 1, next_idx))
-                                    .unwrap()
-                                    .push(((end, item_idx), (69, 69))),
-                                None => {
-                                    hist.insert(
-                                        (end + 1, next.len()),
-                                        vec![((end, item_idx), (69, 69))],
-                                    );
-                                    next.push(value);
-                                }
+                        if let Some(&token) = tokens.get(end) {
+                            if token == symbol.0 {
+                                let next = &mut tail[0];
+                                let entry = (item.to_next(), start);
+                                // Only insert into state set if it's not already there.
+                                // But either way we still need tò add the entry into the history.
+                                let idx =
+                                    next.iter().position(|x| x == &entry).unwrap_or_else(|| {
+                                        next.push(entry);
+                                        next.len() - 1
+                                    });
+                                hist.entry((end + 1, idx))
+                                    .or_default()
+                                    .push(HistoryValue::Scan {
+                                        prev: (end, item_idx),
+                                    });
                             }
-                        } else if end >= tokens.len() {
-                            assert_eq!(end, tokens.len());
-                            assert!(std::ptr::eq(next, taddr));
                         }
                     }
 
                     Symbol::NonTerminal(symbol) => {
                         // Predict
                         for production in grammar.productions_from(symbol) {
-                            let value = (ItemEnum::new(production), end);
+                            let value = (Item::new(production), end);
                             if !current.contains(&value) {
                                 current.push(value);
                             }
                         }
                     }
                 },
-                ItemEnum::Complete(item) => {
+                Item::Complete(item) => {
                     // Complete
 
-                    // TODO: Don't use clone
-                    let symbol = Symbol::NonTerminal(item.production.lhs.clone());
+                    let symbol = &item.production.lhs;
 
-                    #[allow(clippy::comparison_chain)]
-                    if start == end {
-                        // NOTE: This must be an epsilon production
-                        // FIXME: Add to parents.
-                        // Perhaps merge implementation with the general case.
-                        assert!(item.production.rhs.is_empty());
-                        let mut to_push = vec![];
-                        for &(ref parent_item, parent_start) in current.iter() {
-                            if let ItemEnum::Incomplete(parent_item) = parent_item {
-                                if parent_item.next_symbol() == &symbol {
-                                    to_push.push((parent_item.clone().to_next(), parent_start));
-                                }
-                            }
-                        }
-                        current.extend(to_push);
-                    } else if start > end {
-                        panic!("start > end");
+                    // Now search for possible parents.
+                    // The end of parent == start of current item
+                    // (end being the location of dot)
+                    let parent_end_set = if start == end {
+                        &*current
                     } else {
-                        for (parent_idx, &(ref parent_item, parent_start)) in
-                            front[start].iter().enumerate()
-                        {
-                            if let ItemEnum::Incomplete(parent_item) = parent_item {
-                                if parent_item.next_symbol() == &symbol {
-                                    let value = (parent_item.clone().to_next(), parent_start);
-                                    match current.iter().position(|x| x == &value) {
-                                        Some(current_idx) => {
-                                            hist.get_mut(&(end, current_idx))
-                                                .unwrap()
-                                                .push(((start, parent_idx), (end, item_idx)));
-                                        }
-                                        None => {
-                                            hist.insert(
-                                                (end, current.len()),
-                                                vec![((start, parent_idx), (end, item_idx))],
-                                            );
-                                            current.push(value);
-                                        }
-                                    }
+                        &front[start]
+                    };
+                    let mut to_add = vec![];
+                    for (parent_idx, &(parent_item, parent_start)) in
+                        parent_end_set.iter().enumerate()
+                    {
+                        if let Item::Incomplete(parent_item) = parent_item {
+                            if let Symbol::NonTerminal(parent_symbol) = parent_item.next_symbol() {
+                                if parent_symbol == symbol {
+                                    // The predict step in parent created current item.
+                                    // Now, for the parent, move the dot over the next symbol
+                                    // (must have been a nonterminal the matches the lhs of the
+                                    // current production) and add it to the state set.
+                                    //
+                                    // For the history of the new item (parent with dot moved), we push on:
+                                    // [(prev item of parent - with the dot one place back: ie. the original parent, (start == parent_end)
+                                    //   pointer to completed item of the just completed nonterminal in parent: ie. the current item)]
+                                    //
+                                    to_add.push((
+                                        (parent_item.to_next(), parent_start),
+                                        // ((start, parent_idx), (end, item_idx)),
+                                        HistoryValue::Complete {
+                                            prev: (start, parent_idx),
+                                            parent: (end, item_idx),
+                                        },
+                                    ));
                                 }
                             }
                         }
+                    }
+                    for (entry, history_value) in to_add {
+                        // Only insert into state set if it's not already there.
+                        // But either way we still need tò add the entry into the history.
+                        let idx = current.iter().position(|x| x == &entry).unwrap_or_else(|| {
+                            current.push(entry);
+                            current.len() - 1
+                        });
+                        hist.entry((end, idx)).or_default().push(history_value);
                     }
                 }
             }
             item_idx += 1;
         }
     }
-    for row in states[states.len() - 1].iter() {
-        if matches!(row, (ItemEnum::Complete(_), 0)) {
-            println!("{:?}", row);
-        }
-    }
 
     let mut collect = hist.iter().collect::<Vec<_>>();
-    collect.sort();
-    for (&current, parents) in collect.into_iter() {
-        for &(prev, parent) in parents.iter() {
+    collect.sort_by_key(|(&k, _)| k);
+    for (&current, hists) in collect {
+        for history in hists.iter() {
+            let (prev, parent) = match *history {
+                HistoryValue::Scan { prev } => (prev, None),
+                HistoryValue::Complete { prev, parent } => (prev, Some(parent)),
+            };
             println!(
                 "{:?}\t{}\t{}\t{}",
-                (current, prev, parent),
+                (current, prev, parent.unwrap_or((69, 69))),
                 states[current.0][current.1].0,
                 states[prev.0][prev.1].0,
-                if parent == (69, 69) {
-                    "".to_string()
-                } else {
+                if let Some(parent) = parent {
                     states[parent.0][parent.1].0.to_string()
+                } else {
+                    "".to_string()
                 },
             );
         }
     }
 
-    let mut complete = vec![];
-    for (item_idx, &(ref item, start)) in states.last().unwrap().iter().enumerate() {
-        if matches!(item, ItemEnum::Complete(_)) && start == 0 {
-            complete.push((states.len() - 1, item_idx));
-            let trees = build_trees(&states, &hist, (states.len() - 1, item_idx));
-            for tree in trees {
-                println!("{}\n", tree);
+    states
+        .last()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .filter(|(_, &entry)| {
+            if let (Item::Complete(item), 0) = entry {
+                item.production.lhs == grammar.start
+            } else {
+                false
             }
-        }
-    }
-
-    None
+        })
+        .flat_map(|(idx, _)| build_trees(&states, &hist, (states.len() - 1, idx)))
+        .collect()
 }
