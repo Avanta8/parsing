@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use parsing::{
+    earley,
     grammar::{Grammar, NonTerminal, Production, Symbol, Terminal},
     recursive_descent,
 };
@@ -51,9 +52,11 @@ fn build_grammar(
 
 fn run(grammar: &Grammar, s: &str) {
     let tokens = s.split_whitespace().collect::<Vec<_>>();
-    let res = recursive_descent::parse(grammar, &tokens);
+    // let res = recursive_descent::parse(grammar, &tokens);
+    let res = earley::parse(grammar, &tokens);
+    println!("finished");
     if let Some(r) = res {
-        println!("{}", r);
+        // println!("{}", r);
     }
 }
 
@@ -67,7 +70,7 @@ fn main() {
                 ("E'", "+ T E' | "),
                 ("T", "F T'"),
                 ("T'", "* F T' | "),
-                ("F", "( E ) | |ID"),
+                ("F", "( E ) | ID"),
                 ("ID", "w | x | y | z"),
             ],
             "E",
@@ -79,14 +82,31 @@ fn main() {
                 ("E", "E + T | T"),
                 ("T", "T * F | F"),
                 ("F", "( E ) | ID"),
-                ("F", "( E ) | x"),
                 ("ID", "w | x | y | z"),
             ],
             "E",
         ),
+        build_grammar(
+            "S NP VP PP N V P",
+            "can fish in rivers they",
+            vec![
+                ("S", "NP VP"),
+                ("NP", "N PP | N"),
+                ("PP", "P NP"),
+                ("VP", "VP PP | V VP | V NP | V"),
+                ("N", "can | they | fish | rivers"),
+                ("P", "in"),
+                ("V", "can | fish"),
+            ],
+            "S",
+        ),
     ];
-    for grammar in grammars {
+    for grammar in grammars[0..2].iter() {
         let tokens = "w + x * ( y + z ) * w";
-        run(&grammar, tokens);
+        run(grammar, tokens);
+    }
+    for grammar in grammars[2..3].iter() {
+        let tokens = "they can fish";
+        run(grammar, tokens);
     }
 }

@@ -3,12 +3,6 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Terminal(pub String);
 
-impl Terminal {
-    pub fn equals(&self, s: &str) -> bool {
-        self.0 == s
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NonTerminal(pub String);
 
@@ -35,7 +29,7 @@ impl Grammar {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Production {
     pub lhs: NonTerminal,
     pub rhs: Vec<Symbol>,
