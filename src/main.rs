@@ -1,13 +1,14 @@
 use parsing::{
     earley,
     grammar::{build_grammar, Grammar},
-    recursive_descent,
+    ll1, recursive_descent,
 };
 
 fn run(grammar: &Grammar, s: &str) {
     let tokens = s.split_whitespace().collect::<Vec<_>>();
     // let res = recursive_descent::parse(grammar, &tokens);
-    let res = earley::parse(grammar, &tokens);
+    // let res = earley::parse(grammar, &tokens);
+    let res = ll1::parse(grammar, &tokens);
     for r in res {
         println!("{}\n", r);
     }
@@ -44,7 +45,7 @@ fn main() {
             "E",
         ),
         build_grammar(
-            "E | ID",
+            "E ID",
             "+ * ( ) w x y z",
             vec![("E", "E + E | E * E | ( E ) | ID"), ("ID", "w | x | y | z")],
             "E",

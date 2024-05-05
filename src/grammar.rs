@@ -1,15 +1,44 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt, sync::OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Terminal(pub String);
 
+impl fmt::Display for Terminal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NonTerminal(pub String);
+
+impl fmt::Display for NonTerminal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Symbol {
     Terminal(Terminal),
     NonTerminal(NonTerminal),
+}
+
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Symbol::Terminal(s) => s.fmt(f),
+            Symbol::NonTerminal(s) => s.fmt(f),
+        }
+    }
+}
+
+impl Symbol {
+    /// End-of-input marker
+    pub fn eoim() -> &'static Terminal {
+        static T: OnceLock<Terminal> = OnceLock::new();
+        T.get_or_init(|| Terminal("$".to_string()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
