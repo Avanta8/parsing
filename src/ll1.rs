@@ -9,7 +9,8 @@ type FirstSet<'a> = HashMap<&'a NonTerminal, HashSet<Option<&'a Terminal>>>;
 type FollowSet<'a> = HashMap<&'a NonTerminal, HashSet<&'a Terminal>>;
 type Table<'a> = HashMap<(&'a NonTerminal, &'a Terminal), Vec<&'a Production>>;
 
-fn first_rhs<'a>(rhs: &'a [Symbol], first: &'a FirstSet) -> (HashSet<&'a Terminal>, bool) {
+/// Returns first(`rhs`) - {ε} and if ε ∈ first(`rhs`)
+fn first_rhs<'a>(rhs: &'a [Symbol], first: &FirstSet<'a>) -> (HashSet<&'a Terminal>, bool) {
     let mut set = HashSet::new();
     let mut nullable = true;
     for symbol in rhs.iter() {
@@ -52,37 +53,13 @@ fn create_first(grammar: &Grammar) -> FirstSet {
     while changed {
         changed = false;
         for production in grammar.productions() {
-            let lhs = production.lhs();
-            let rhs = production.rhs();
-            let mut nullable = true;
-            for symbol in rhs.iter() {
-                if !nullable {
-                    break;
-                }
-                nullable = false;
-                match symbol {
-                    Symbol::Terminal(t) => {
-                        changed |= first.get_mut(lhs).unwrap().insert(Some(t));
-                    }
-                    Symbol::NonTerminal(nt) => {
-                        let elements = first[nt]
-                            .iter()
-                            .copied()
-                            .filter(Option::is_some) // Don't add epsilons
-                            .collect::<Vec<_>>();
-                        let set = first.get_mut(lhs).unwrap();
-                        for element in elements {
-                            if element.is_some() {
-                                changed |= set.insert(element);
-                            } else {
-                                // nullable = true;
-                            }
-                        }
-                    }
-                }
+            let (terminals, nullable) = first_rhs(production.rhs(), &first);
+            let set = first.get_mut(production.lhs()).unwrap();
+            for terminal in terminals {
+                changed |= set.insert(Some(terminal));
             }
             if nullable {
-                changed |= first.get_mut(lhs).unwrap().insert(None);
+                changed |= set.insert(None);
             }
         }
     }
@@ -111,38 +88,17 @@ pub fn create_follow<'a>(grammar: &'a Grammar, first: &'a FirstSet) -> FollowSet
                 let Symbol::NonTerminal(current) = current else {
                     continue;
                 };
-                // `nullable` is true iff everything following the current symbol up
-                // till `next` is nullable
-                let mut nullable = true;
-                for next in rhs.iter().skip(i + 1) {
-                    if !nullable {
-                        break;
-                    }
-                    nullable = false;
-                    match next {
-                        Symbol::Terminal(next) => {
-                            changed |= follow.get_mut(current).unwrap().insert(next);
-                        }
-                        Symbol::NonTerminal(next) => {
-                            let set = follow.get_mut(current).unwrap();
-                            for f in first[next].iter() {
-                                if let Some(t) = f {
-                                    changed |= set.insert(t);
-                                } else {
-                                    // epsilon
-                                    nullable = true;
-                                }
-                            }
-                        }
-                    }
-                }
+                let (mut terminals, nullable) = first_rhs(&rhs[i + 1..], first);
+
                 if nullable {
-                    // Either nullable or current is the last symbol in the rhs
-                    let elements = follow[lhs].iter().copied().collect::<Vec<_>>();
-                    let set = follow.get_mut(current).unwrap();
-                    for t in elements {
-                        changed |= set.insert(t);
-                    }
+                    // Either the remaining rhs is nullable, or current is the
+                    // last symbol in the rhs
+                    terminals.extend(follow[lhs].iter());
+                }
+
+                let set = follow.get_mut(current).unwrap();
+                for terminal in terminals {
+                    changed |= set.insert(terminal);
                 }
             }
         }
@@ -150,14 +106,39 @@ pub fn create_follow<'a>(grammar: &'a Grammar, first: &'a FirstSet) -> FollowSet
     follow
 }
 
-pub fn create_table<'a>(grammar: &'a Grammar, first: &'a FirstSet, follow: &'a FollowSet) {
+pub fn create_table<'a>(
+    grammar: &'a Grammar,
+    first: &'a FirstSet,
+    follow: &'a FollowSet,
+) -> Table<'a> {
+    let mut table = HashMap::new();
+    for nt in grammar.nonterminals() {
+        for t in grammar
+            .terminals()
+            .iter()
+            .chain(std::iter::once(Symbol::eoim()))
+        {
+            table.insert((nt, t), vec![]);
+        }
+    }
     for production in grammar.productions() {
         let lhs = production.lhs();
-        let rhs = production.rhs();
+        let (terminals, nullable) = first_rhs(production.rhs(), first);
+
+        for terminal in terminals.iter() {
+            table.get_mut(&(lhs, terminal)).unwrap().push(production);
+        }
+
+        if nullable {
+            for terminal in follow[lhs].iter() {
+                table.get_mut(&(lhs, terminal)).unwrap().push(production);
+            }
+        }
     }
+    table
 }
 
-pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Option<ParseTree<'a>> {
+pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Result<Option<ParseTree<'a>>, ()> {
     let first = create_first(grammar);
     let follow = create_follow(grammar, &first);
 
@@ -169,7 +150,7 @@ pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Option<ParseTree<'a>>
                 if let Some(s) = s {
                     s.to_string()
                 } else {
-                    "ϵ".to_string()
+                    "ε".to_string()
                 }
             })
             .collect::<Vec<_>>()
@@ -187,5 +168,29 @@ pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Option<ParseTree<'a>>
         println!("{}: {}", k, v);
     }
 
-    None
+    println!();
+    println!("Table: ");
+    let table = create_table(grammar, &first, &follow);
+    for (k, v) in table.iter() {
+        if v.is_empty() {
+            continue;
+        }
+        println!(
+            "{} {}\t{}",
+            k.0,
+            k.1,
+            v.iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    for v in table.values() {
+        if v.len() > 1 {
+            return Err(());
+        }
+    }
+
+    Ok(None)
 }

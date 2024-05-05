@@ -9,8 +9,20 @@ fn run(grammar: &Grammar, s: &str) {
     // let res = recursive_descent::parse(grammar, &tokens);
     // let res = earley::parse(grammar, &tokens);
     let res = ll1::parse(grammar, &tokens);
-    for r in res {
-        println!("{}\n", r);
+    // for r in res {
+    //     println!("{}\n", r);
+    // }
+    match res {
+        Ok(res) => {
+            if let Some(res) = res {
+                println!("{}\n", res);
+            } else {
+                println!("no parse");
+            }
+        }
+        Err(_) => {
+            println!("conflict")
+        }
     }
     println!("finished\n");
     // if let Some(r) = res {

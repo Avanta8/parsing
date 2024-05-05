@@ -57,6 +57,21 @@ impl Production {
     }
 }
 
+impl fmt::Display for Production {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} -> {}",
+            self.lhs(),
+            self.rhs
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Grammar {
     nonterminals: HashSet<NonTerminal>,
