@@ -28,7 +28,7 @@ impl<'a> TreeResult<'a> {
     fn new(grammar: &'a Grammar) -> Self {
         Tree::<Incomplete> {
             grammar,
-            arena: vec![vec![Elem::Unexpanded(&grammar.start)]],
+            arena: vec![vec![Elem::Unexpanded(grammar.start())]],
             position: (0, 0),
             parent: vec![None],
             _complete: std::marker::PhantomData,
@@ -91,7 +91,7 @@ impl<'a> Tree<'a, Incomplete> {
                 for production in self.grammar.productions_from(nt) {
                     let mut new_tree = self.clone();
                     let subtree = production
-                        .rhs
+                        .rhs()
                         .iter()
                         .map(|s| match s {
                             Symbol::Terminal(t) => Elem::Terminal(t),

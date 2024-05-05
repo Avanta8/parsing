@@ -1,54 +1,8 @@
-use std::collections::HashSet;
-
 use parsing::{
     earley,
-    grammar::{Grammar, NonTerminal, Production, Symbol, Terminal},
+    grammar::{build_grammar, Grammar},
     recursive_descent,
 };
-
-fn build_grammar(
-    given_nonterminals: &str,
-    terminals: &str,
-    // given_productions: Vec<(impl Into<String>, Vec<Vec<impl Into<String>>>)>,
-    given_productions: Vec<(&str, &str)>,
-    start: &str,
-) -> Grammar {
-    let nonterminals = given_nonterminals
-        .split_whitespace()
-        .map(|nt| NonTerminal(nt.into()))
-        .collect::<HashSet<_>>();
-    let terminals = terminals
-        .split_whitespace()
-        .map(|t| Terminal(t.into()))
-        .collect();
-    let mut productions = vec![];
-    for production in given_productions {
-        let lhs = production.0;
-        for rhs in production.1.split('|').map(|s| s.trim()) {
-            productions.push(Production {
-                lhs: NonTerminal(lhs.to_string()),
-                rhs: {
-                    rhs.split_whitespace()
-                        .map(|s| {
-                            let s = s.to_string();
-                            if nonterminals.contains(&NonTerminal(s.clone())) {
-                                Symbol::NonTerminal(NonTerminal(s))
-                            } else {
-                                Symbol::Terminal(Terminal(s))
-                            }
-                        })
-                        .collect()
-                },
-            })
-        }
-    }
-    Grammar {
-        nonterminals,
-        terminals,
-        productions,
-        start: NonTerminal(start.into()),
-    }
-}
 
 fn run(grammar: &Grammar, s: &str) {
     let tokens = s.split_whitespace().collect::<Vec<_>>();

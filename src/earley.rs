@@ -21,7 +21,7 @@ struct ItemBase<'a, C> {
 
 impl<'a, C> fmt::Display for ItemBase<'a, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let before = self.production.rhs[..self.dot_idx]
+        let before = self.production.rhs()[..self.dot_idx]
             .iter()
             .map(|s| match s {
                 Symbol::Terminal(s) => s.0.as_str(),
@@ -29,7 +29,7 @@ impl<'a, C> fmt::Display for ItemBase<'a, C> {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let after = self.production.rhs[self.dot_idx..]
+        let after = self.production.rhs()[self.dot_idx..]
             .iter()
             .map(|s| match s {
                 Symbol::Terminal(s) => s.0.as_str(),
@@ -41,7 +41,7 @@ impl<'a, C> fmt::Display for ItemBase<'a, C> {
         write!(
             f,
             "{} -> {}{}.{}{}",
-            self.production.lhs.0,
+            self.production.lhs().0,
             before,
             if before.is_empty() { "" } else { " " },
             if after.is_empty() { "" } else { " " },
@@ -52,12 +52,12 @@ impl<'a, C> fmt::Display for ItemBase<'a, C> {
 
 impl<'a> ItemBase<'a, Incomplete> {
     pub fn next_symbol(&self) -> &'a Symbol {
-        &self.production.rhs[self.dot_idx]
+        &self.production.rhs()[self.dot_idx]
     }
 
     pub fn to_next(mut self) -> Item<'a> {
         self.dot_idx += 1;
-        if self.dot_idx < self.production.rhs.len() {
+        if self.dot_idx < self.production.rhs().len() {
             Item::Incomplete(self)
         } else {
             Item::Complete(self.into())
@@ -101,7 +101,7 @@ impl<'a> fmt::Display for Item<'a> {
 
 impl<'a> Item<'a> {
     pub fn new(production: &'a Production) -> Self {
-        if production.rhs.is_empty() {
+        if production.rhs().is_empty() {
             Self::Complete(ItemBase {
                 production,
                 dot_idx: 0,
@@ -138,13 +138,13 @@ fn build_trees<'a>(
     hist: &HashMap<(usize, usize), Vec<HistoryValue>>,
     current: (usize, usize),
 ) -> Vec<ParseTree<'a>> {
-    let lhs = &states[current.0][current.1].0.production().lhs;
+    let lhs = &states[current.0][current.1].0.production().lhs();
 
     // The row for parse tree children in built in reverse
     let mut bag = vec![(current, vec![])];
     let mut parse_trees = vec![];
     while let Some((current, mut row)) = bag.pop() {
-        assert_eq!(lhs, &states[current.0][current.1].0.production().lhs);
+        assert_eq!(lhs, &states[current.0][current.1].0.production().lhs());
         if let Some(hists) = hist.get(&current) {
             for history in hists.iter() {
                 match *history {
@@ -185,7 +185,7 @@ fn build_trees<'a>(
 
 pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Vec<ParseTree<'a>> {
     let mut states = vec![vec![]; tokens.len() + 1];
-    for production in grammar.productions_from(&grammar.start) {
+    for production in grammar.productions_from(grammar.start()) {
         states[0].push((Item::new(production), 0));
     }
     let mut hist = HashMap::<_, Vec<_>>::new();
@@ -238,7 +238,7 @@ pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Vec<ParseTree<'a>> {
                 Item::Complete(item) => {
                     // Complete
 
-                    let symbol = &item.production.lhs;
+                    let symbol = item.production.lhs();
 
                     // Now search for possible parents.
                     // The end of parent == start of current item
@@ -320,7 +320,7 @@ pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Vec<ParseTree<'a>> {
         .enumerate()
         .filter(|(_, &entry)| {
             if let (Item::Complete(item), 0) = entry {
-                item.production.lhs == grammar.start
+                item.production.lhs() == grammar.start()
             } else {
                 false
             }
