@@ -1,126 +1,42 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::{
+    first_follow::{create_first, create_follow, first_rhs, FirstSet, FollowSet},
     grammar::{Grammar, NonTerminal, Production, Symbol, Terminal},
     parse_tree::ParseTree,
 };
 
-type FirstSet<'a> = HashMap<&'a NonTerminal, HashSet<Option<&'a Terminal>>>;
-type FollowSet<'a> = HashMap<&'a NonTerminal, HashSet<&'a Terminal>>;
-type Table<'a> = HashMap<(&'a NonTerminal, &'a Terminal), Vec<&'a Production>>;
+pub type LL1Table<'a> = HashMap<(&'a NonTerminal, &'a Terminal), Vec<&'a Production>>;
 
-/// Returns first(`rhs`) - {ε} and if ε ∈ first(`rhs`)
-fn first_rhs<'a>(rhs: &'a [Symbol], first: &FirstSet<'a>) -> (HashSet<&'a Terminal>, bool) {
-    let mut set = HashSet::new();
-    let mut nullable = true;
-    for symbol in rhs.iter() {
-        if !nullable {
-            break;
-        }
-        nullable = false;
-        match symbol {
-            Symbol::Terminal(t) => {
-                set.insert(t);
-            }
-            Symbol::NonTerminal(nt) => {
-                let elements = first[nt].iter().copied().collect::<Vec<_>>();
-                for element in elements {
-                    if let Some(element) = element {
-                        set.insert(element);
-                    } else {
-                        nullable = true;
-                    }
-                }
-            }
-        }
-    }
-    (set, nullable)
+#[derive(Debug, Clone)]
+enum Tree<'a> {
+    Terminal(&'a Terminal),
+    Nonterminal(&'a NonTerminal, usize),
 }
 
-fn create_first(grammar: &Grammar) -> FirstSet {
-    // None represents epsilon
-    //
-    // first[nt] contains None only if nt is nullable.
-    // Relationship should be iff by the end of the fixed point iterations.
-    // (But I should probably prove this)
-    let mut first = grammar
-        .nonterminals()
-        .iter()
-        .zip(std::iter::repeat_with(HashSet::new))
-        .collect::<HashMap<_, _>>();
-
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for production in grammar.productions() {
-            let (terminals, nullable) = first_rhs(production.rhs(), &first);
-            let set = first.get_mut(production.lhs()).unwrap();
-            for terminal in terminals {
-                changed |= set.insert(Some(terminal));
-            }
-            if nullable {
-                changed |= set.insert(None);
-            }
-        }
-    }
-
-    first
-}
-
-pub fn create_follow<'a>(grammar: &'a Grammar, first: &'a FirstSet) -> FollowSet<'a> {
-    let mut follow = grammar
-        .nonterminals()
-        .iter()
-        .zip(std::iter::repeat_with(HashSet::new))
-        .collect::<HashMap<_, _>>();
-    follow
-        .get_mut(grammar.start())
-        .unwrap()
-        .insert(Symbol::eoim());
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for production in grammar.productions() {
-            let lhs = production.lhs();
-            let rhs = production.rhs();
-
-            for (i, current) in rhs.iter().enumerate() {
-                let Symbol::NonTerminal(current) = current else {
-                    continue;
-                };
-                let (mut terminals, nullable) = first_rhs(&rhs[i + 1..], first);
-
-                if nullable {
-                    // Either the remaining rhs is nullable, or current is the
-                    // last symbol in the rhs
-                    terminals.extend(follow[lhs].iter());
-                }
-
-                let set = follow.get_mut(current).unwrap();
-                for terminal in terminals {
-                    changed |= set.insert(terminal);
-                }
-            }
-        }
-    }
-    follow
+#[derive(Debug, Clone)]
+pub enum ParseResult<'a> {
+    Conflict,
+    NoParse,
+    Parse(ParseTree<'a>),
 }
 
 pub fn create_table<'a>(
     grammar: &'a Grammar,
-    first: &'a FirstSet,
-    follow: &'a FollowSet,
-) -> Table<'a> {
+    first: &FirstSet<'a>,
+    follow: &FollowSet<'a>,
+) -> LL1Table<'a> {
     let mut table = HashMap::new();
     for nt in grammar.nonterminals() {
         for t in grammar
             .terminals()
             .iter()
-            .chain(std::iter::once(Symbol::eoim()))
+            .chain(std::iter::once(Terminal::eoim()))
         {
             table.insert((nt, t), vec![]);
         }
     }
+
     for production in grammar.productions() {
         let lhs = production.lhs();
         let (terminals, nullable) = first_rhs(production.rhs(), first);
@@ -138,59 +54,128 @@ pub fn create_table<'a>(
     table
 }
 
-pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Result<Option<ParseTree<'a>>, ()> {
+pub fn table_to_string(table: &LL1Table) -> String {
+    table
+        .iter()
+        .filter_map(|(k, v)| {
+            if v.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "{} {}\t{}",
+                    k.0,
+                    k.1,
+                    v.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }
+        })
+        .chain(std::iter::once("".to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn gen_parse_tree<'a>(trees: &[Vec<Tree<'a>>], current: &Tree<'a>) -> ParseTree<'a> {
+    match *current {
+        Tree::Terminal(t) => ParseTree::Terminal(t),
+        Tree::Nonterminal(nt, children_idx) => ParseTree::NonTerminal(
+            nt,
+            trees[children_idx]
+                .iter()
+                .map(|child| gen_parse_tree(trees, child))
+                .collect(),
+        ),
+    }
+}
+
+pub fn parse_with_table<'a>(
+    grammar: &'a Grammar,
+    tokens: &[&str],
+    table: &LL1Table<'a>,
+) -> ParseResult<'a> {
+    let start = Symbol::NonTerminal(grammar.start());
+    let eoim = Symbol::<&Terminal, &NonTerminal>::eoim();
+    let mut stack = vec![(eoim.clone(), 0), (start, 0)];
+
+    let mut trees = vec![vec![]];
+
+    let mut idx = 0;
+
+    while let Some((top, parent)) = stack.pop() {
+        if top == eoim {
+            break;
+        }
+        match top {
+            Symbol::Terminal(top) => {
+                if top.0 == tokens[idx] {
+                    idx += 1;
+                    // Add the terminal into the subtree of the parent.
+                    trees[parent].push(Tree::Terminal(top));
+                } else {
+                    // fail to parse
+                    return ParseResult::NoParse;
+                }
+            }
+            Symbol::NonTerminal(top) => {
+                // HACK:
+                // Set the token to the end-of-input marker if we have reached the end of input.
+                assert!(idx <= tokens.len());
+                let token = Terminal(
+                    tokens
+                        .get(idx)
+                        .copied()
+                        .unwrap_or_else(|| Terminal::eoim().0.as_str())
+                        .to_string(),
+                );
+                let entry = &table[&(top, &token)];
+                assert!(entry.len() < 2);
+                if let Some(production) = entry.first() {
+                    assert_eq!(top, production.lhs());
+
+                    // Add the subtree for this production.
+                    trees.push(vec![]);
+
+                    let value = trees.len() - 1;
+                    // Add the subtree into the children of the parent.
+                    trees[parent].push(Tree::Nonterminal(top, value));
+
+                    // Push the rhs onto the stack in reverse.
+                    stack.extend(
+                        production
+                            .rhs()
+                            .iter()
+                            .map(Symbol::as_ref)
+                            .rev()
+                            .zip(std::iter::repeat(value)),
+                    );
+                } else {
+                    // fail to parse
+                    return ParseResult::NoParse;
+                }
+            }
+        }
+    }
+
+    assert_eq!(trees[0].len(), 1);
+    ParseResult::Parse(gen_parse_tree(&trees, &trees[0][0]))
+}
+
+pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> ParseResult<'a> {
     let first = create_first(grammar);
     let follow = create_follow(grammar, &first);
-
-    println!("First: ");
-    for (k, v) in first.iter() {
-        let v = v
-            .iter()
-            .map(|s| {
-                if let Some(s) = s {
-                    s.to_string()
-                } else {
-                    "ε".to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("{}: {}", k, v);
-    }
-    println!();
-    println!("Follow: ");
-    for (k, v) in follow.iter() {
-        let v = v
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("{}: {}", k, v);
-    }
-
-    println!();
-    println!("Table: ");
     let table = create_table(grammar, &first, &follow);
-    for (k, v) in table.iter() {
-        if v.is_empty() {
-            continue;
-        }
-        println!(
-            "{} {}\t{}",
-            k.0,
-            k.1,
-            v.iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
+
+    // println!("First:\n{}", first_to_string(&first));
+    // println!("Follow:\n{}", follow_to_string(&follow));
+    // println!("Table:\n{}", table_to_string(&table));
 
     for v in table.values() {
         if v.len() > 1 {
-            return Err(());
+            return ParseResult::Conflict;
         }
     }
 
-    Ok(None)
+    parse_with_table(grammar, tokens, &table)
 }

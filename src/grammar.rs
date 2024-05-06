@@ -19,12 +19,16 @@ impl fmt::Display for NonTerminal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Symbol {
-    Terminal(Terminal),
-    NonTerminal(NonTerminal),
+pub enum Symbol<T, N> {
+    Terminal(T),
+    NonTerminal(N),
 }
 
-impl fmt::Display for Symbol {
+impl<T, N> fmt::Display for Symbol<T, N>
+where
+    T: fmt::Display,
+    N: fmt::Display,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Symbol::Terminal(s) => s.fmt(f),
@@ -33,7 +37,7 @@ impl fmt::Display for Symbol {
     }
 }
 
-impl Symbol {
+impl Terminal {
     /// End-of-input marker
     pub fn eoim() -> &'static Terminal {
         static T: OnceLock<Terminal> = OnceLock::new();
@@ -41,10 +45,34 @@ impl Symbol {
     }
 }
 
+impl<T, N> Symbol<T, N> {
+    pub fn as_ref(&self) -> Symbol<&T, &N> {
+        match self {
+            Symbol::Terminal(t) => Symbol::Terminal(t),
+            Symbol::NonTerminal(n) => Symbol::NonTerminal(n),
+        }
+    }
+}
+
+impl Symbol<Terminal, NonTerminal> {
+    /// End-of-input marker
+    pub fn eoim() -> &'static Self {
+        static T: OnceLock<Symbol<Terminal, NonTerminal>> = OnceLock::new();
+        T.get_or_init(|| Symbol::Terminal(Terminal("$".to_string())))
+    }
+}
+
+impl Symbol<&Terminal, &NonTerminal> {
+    /// End-of-input marker
+    pub fn eoim() -> Self {
+        Self::Terminal(Terminal::eoim())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Production {
     lhs: NonTerminal,
-    rhs: Vec<Symbol>,
+    rhs: Vec<Symbol<Terminal, NonTerminal>>,
 }
 
 impl Production {
@@ -52,7 +80,7 @@ impl Production {
         &self.lhs
     }
 
-    pub fn rhs(&self) -> &[Symbol] {
+    pub fn rhs(&self) -> &[Symbol<Terminal, NonTerminal>] {
         &self.rhs
     }
 }

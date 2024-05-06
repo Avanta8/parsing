@@ -3,7 +3,7 @@
 use std::{collections::HashMap, fmt, marker::PhantomData};
 
 use crate::{
-    grammar::{Grammar, Production, Symbol},
+    grammar::{Grammar, NonTerminal, Production, Symbol, Terminal},
     parse_tree::ParseTree,
 };
 
@@ -51,7 +51,7 @@ impl<'a, C> fmt::Display for ItemBase<'a, C> {
 }
 
 impl<'a> ItemBase<'a, Incomplete> {
-    pub fn next_symbol(&self) -> &'a Symbol {
+    pub fn next_symbol(&self) -> &'a Symbol<Terminal, NonTerminal> {
         &self.production.rhs()[self.dot_idx]
     }
 

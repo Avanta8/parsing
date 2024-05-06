@@ -1,33 +1,16 @@
 use parsing::{
-    earley,
     grammar::{build_grammar, Grammar},
-    ll1, recursive_descent,
+    recursive_descent,
 };
 
-fn run(grammar: &Grammar, s: &str) {
-    let tokens = s.split_whitespace().collect::<Vec<_>>();
-    // let res = recursive_descent::parse(grammar, &tokens);
-    // let res = earley::parse(grammar, &tokens);
-    let res = ll1::parse(grammar, &tokens);
-    // for r in res {
-    //     println!("{}\n", r);
-    // }
-    match res {
-        Ok(res) => {
-            if let Some(res) = res {
-                println!("{}\n", res);
-            } else {
-                println!("no parse");
-            }
-        }
-        Err(_) => {
-            println!("conflict")
-        }
+fn run(grammar: &Grammar, string: &str) {
+    let tokens = string.split_whitespace().collect::<Vec<_>>();
+    let res = recursive_descent::parse(grammar, &tokens);
+    if let Some(tree) = res {
+        println!("{}\n", tree);
+    } else {
+        println!("Fail");
     }
-    println!("finished\n");
-    // if let Some(r) = res {
-    // println!("{}", r);
-    // }
 }
 
 fn main() {
@@ -79,15 +62,15 @@ fn main() {
         build_grammar("S", "b", vec![("S", "S S | b")], "S"),
     ];
     for grammar in grammars[0..3].iter() {
-        let tokens = "w + x * ( y + z ) * w";
-        run(grammar, tokens);
+        let string = "w + x * ( y + z ) * w + y * x";
+        run(grammar, string);
     }
     for grammar in grammars[3..4].iter() {
-        let tokens = "they can fish";
-        run(grammar, tokens);
+        let string = "they can fish";
+        run(grammar, string);
     }
     for grammar in grammars[4..5].iter() {
-        let tokens = "b b b";
-        run(grammar, tokens);
+        let string = "b b b";
+        run(grammar, string);
     }
 }
