@@ -1,121 +1,12 @@
 // With credit to https://loup-vaillant.fr/tutorials/earley-parsing/recogniser
 
-use std::{collections::HashMap, fmt, marker::PhantomData};
+use std::collections::HashMap;
 
 use crate::{
-    grammar::{Grammar, NonTerminal, Production, Symbol, Terminal},
+    grammar::{Grammar, Symbol},
+    item::Item,
     parse_tree::ParseTree,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Complete;
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Incomplete;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ItemBase<'a, C> {
-    production: &'a Production,
-    dot_idx: usize,
-    _complete: PhantomData<C>,
-}
-
-impl<'a, C> fmt::Display for ItemBase<'a, C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let before = self.production.rhs()[..self.dot_idx]
-            .iter()
-            .map(|s| match s {
-                Symbol::Terminal(s) => s.0.as_str(),
-                Symbol::NonTerminal(s) => s.0.as_str(),
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let after = self.production.rhs()[self.dot_idx..]
-            .iter()
-            .map(|s| match s {
-                Symbol::Terminal(s) => s.0.as_str(),
-                Symbol::NonTerminal(s) => s.0.as_str(),
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        write!(
-            f,
-            "{} -> {}{}.{}{}",
-            self.production.lhs().0,
-            before,
-            if before.is_empty() { "" } else { " " },
-            if after.is_empty() { "" } else { " " },
-            after,
-        )
-    }
-}
-
-impl<'a> ItemBase<'a, Incomplete> {
-    pub fn next_symbol(&self) -> &'a Symbol<Terminal, NonTerminal> {
-        &self.production.rhs()[self.dot_idx]
-    }
-
-    pub fn to_next(mut self) -> Item<'a> {
-        self.dot_idx += 1;
-        if self.dot_idx < self.production.rhs().len() {
-            Item::Incomplete(self)
-        } else {
-            Item::Complete(self.into())
-        }
-    }
-}
-
-impl<'a> From<ItemBase<'a, Incomplete>> for ItemBase<'a, Complete> {
-    fn from(value: ItemBase<'a, Incomplete>) -> Self {
-        Self {
-            production: value.production,
-            dot_idx: value.dot_idx,
-            _complete: PhantomData,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Item<'a> {
-    Incomplete(ItemBase<'a, Incomplete>),
-    Complete(ItemBase<'a, Complete>),
-}
-
-impl<'a> Item<'a> {
-    fn production(&self) -> &'a Production {
-        match self {
-            Item::Incomplete(i) => i.production,
-            Item::Complete(i) => i.production,
-        }
-    }
-}
-
-impl<'a> fmt::Display for Item<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Item::Incomplete(item) => item.fmt(f),
-            Item::Complete(item) => item.fmt(f),
-        }
-    }
-}
-
-impl<'a> Item<'a> {
-    pub fn new(production: &'a Production) -> Self {
-        if production.rhs().is_empty() {
-            Self::Complete(ItemBase {
-                production,
-                dot_idx: 0,
-                _complete: PhantomData,
-            })
-        } else {
-            Self::Incomplete(ItemBase {
-                production,
-                dot_idx: 0,
-                _complete: PhantomData,
-            })
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 enum HistoryValue {
@@ -238,7 +129,7 @@ pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Vec<ParseTree<'a>> {
                 Item::Complete(item) => {
                     // Complete
 
-                    let symbol = item.production.lhs();
+                    let symbol = item.production().lhs();
 
                     // Now search for possible parents.
                     // The end of parent == start of current item
@@ -320,7 +211,7 @@ pub fn parse<'a>(grammar: &'a Grammar, tokens: &[&str]) -> Vec<ParseTree<'a>> {
         .enumerate()
         .filter(|(_, &entry)| {
             if let (Item::Complete(item), 0) = entry {
-                item.production.lhs() == grammar.start()
+                item.production().lhs() == grammar.start()
             } else {
                 false
             }
